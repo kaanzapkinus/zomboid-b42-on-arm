@@ -70,7 +70,8 @@ extract_ws_id() { printf '%s' "$1" | grep -oE '[0-9]{6,}' | head -1; }
 do_add_mod() {
   echo "$(bold 'Add a mod') — paste a Workshop URL or ID."
   echo "  e.g. https://steamcommunity.com/sharedfiles/filedetails/?id=3713362869"
-  local raw id tmp count=0
+  local raw id tmp count=0 modsdir root info mid cur new esc
+  local -a roots=()
   raw="$(read -rp '  Workshop URL or ID: ' x; echo "$x")"
   id="$(extract_ws_id "$raw")"
   [ -z "$id" ] && { red "Couldn't find a Workshop ID in that."; pause; return; }
@@ -79,24 +80,30 @@ do_add_mod() {
   if ! as_user $PZ_DD -app 108600 -pubfile "$id" -dir "$tmp" >/dev/null 2>&1; then
     red "Download failed (item private? bad ID? Steam hiccup?)."; rm -rf "$tmp"; pause; return
   fi
-  # Install every mod contained in the item as a LOCAL mod (avoids the steam-download crash).
-  while IFS= read -r info; do
-    local root mid
-    root="$(dirname "$info")"; mid="$(grep -m1 '^id=' "$info" | cut -d= -f2- | tr -d '\r')"
+  # Each mod is an immediate subdirectory of the item's mods/ folder. Copy those as LOCAL
+  # mods (avoids the steam-download crash). Ignore nested version subfolders like 42/ —
+  # B42 mods carry a mod.info there too, which would otherwise look like a separate mod.
+  modsdir="$(find "$tmp" -type d -name mods | head -1)"
+  if [ -n "$modsdir" ]; then
+    for root in "$modsdir"/*/; do [ -d "$root" ] && roots+=("${root%/}"); done
+  else
+    while IFS= read -r info; do roots+=("$(dirname "$info")"); done < <(find "$tmp" -name mod.info)
+  fi
+  for root in "${roots[@]}"; do
+    info="$root/mod.info"; [ -f "$info" ] || info="$(find "$root" -maxdepth 2 -name mod.info | head -1)"
+    mid="$(grep -m1 '^id=' "$info" 2>/dev/null | cut -d= -f2- | tr -d '\r')"
     [ -z "$mid" ] && continue
     rm -rf "$PZ_MODS/$(basename "$root")"
     cp -r "$root" "$PZ_MODS/"
-    # add to Mods= (dedup)
-    local cur; cur="$(grep -m1 '^Mods=' "$PZ_INI" | sed 's/^Mods=//')"
+    cur="$(grep -m1 '^Mods=' "$PZ_INI" | sed 's/^Mods=//')"
     if ! printf ';%s;' "$cur" | grep -qF ";$mid;"; then
       [ -z "$cur" ] && new="$mid" || new="$cur;$mid"
-      # escape & and | for sed
       esc="$(printf '%s' "$new" | sed 's/[&|]/\\&/g')"
       sed -i "s|^Mods=.*|Mods=$esc|" "$PZ_INI"
     fi
-    echo "  $(grn '+') installed mod id: $(bold "$mid")"
+    echo "  $(grn '+') installed mod: $(bold "$mid")"
     count=$((count+1))
-  done < <(find "$tmp" -name mod.info)
+  done
   rm -rf "$tmp"; fix_owner "$PZ_MODS" "$PZ_INI"
   [ "$count" -eq 0 ] && { red "No mod.info found in that item."; pause; return; }
   echo
