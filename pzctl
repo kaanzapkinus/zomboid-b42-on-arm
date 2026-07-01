@@ -67,22 +67,27 @@ do_logs() {
 
 extract_ws_id() { printf '%s' "$1" | grep -oE '[0-9]{6,}' | head -1; }
 
-do_add_mod() {
-  echo "$(bold 'Add a mod') — paste a Workshop URL or ID."
-  echo "  e.g. https://steamcommunity.com/sharedfiles/filedetails/?id=3713362869"
-  local raw id tmp count=0 modsdir root info mid cur new esc
-  local -a roots=()
-  raw="$(read -rp '  Workshop URL or ID: ' x; echo "$x")"
-  id="$(extract_ws_id "$raw")"
-  [ -z "$id" ] && { red "Couldn't find a Workshop ID in that."; pause; return; }
-  echo "Downloading Workshop item $(bold "$id") via DepotDownloader..."
-  tmp="$(mktemp -d)"
-  if ! as_user $PZ_DD -app 108600 -pubfile "$id" -dir "$tmp" >/dev/null 2>&1; then
-    red "Download failed (item private? bad ID? Steam hiccup?)."; rm -rf "$tmp"; pause; return
+# If the id is a Workshop COLLECTION, echo its child mod ids; otherwise echo the id itself.
+# Scrapes the page (works for public AND unlisted collections; the Steam API 404s on unlisted).
+resolve_ws_ids() {
+  local id="$1" tmp; tmp="$(mktemp)"
+  curl -s --max-time 25 -A 'Mozilla/5.0' "https://steamcommunity.com/sharedfiles/filedetails/?id=$id" -o "$tmp" 2>/dev/null
+  if grep -q 'class="collectionItem"' "$tmp" 2>/dev/null; then       # it's a collection
+    grep -oE 'sharedfile_[0-9]+' "$tmp" | grep -oE '[0-9]+' | sort -u | grep -v "^${id}$"
+  else
+    printf '%s\n' "$id"
   fi
-  # Each mod is an immediate subdirectory of the item's mods/ folder. Copy those as LOCAL
-  # mods (avoids the steam-download crash). Ignore nested version subfolders like 42/ —
-  # B42 mods carry a mod.info there too, which would otherwise look like a separate mod.
+  rm -f "$tmp"
+}
+
+# Download ONE workshop item and install every mod inside it as a LOCAL mod.
+# Echoes one installed mod id per line; returns non-zero if the download failed.
+install_workshop_item() {
+  local wid="$1" tmp modsdir root info mid cur new esc; local -a roots=()
+  tmp="$(mktemp -d)"
+  as_user $PZ_DD -app 108600 -pubfile "$wid" -dir "$tmp" >/dev/null 2>&1 || { rm -rf "$tmp"; return 1; }
+  # Each mod is an immediate subdirectory of the item's mods/ folder. Ignore nested version
+  # subfolders like 42/ (B42 mods carry a mod.info there too -> would look like a separate mod).
   modsdir="$(find "$tmp" -type d -name mods | head -1)"
   if [ -n "$modsdir" ]; then
     for root in "$modsdir"/*/; do [ -d "$root" ] && roots+=("${root%/}"); done
@@ -101,17 +106,40 @@ do_add_mod() {
       esc="$(printf '%s' "$new" | sed 's/[&|]/\\&/g')"
       sed -i "s|^Mods=.*|Mods=$esc|" "$PZ_INI"
     fi
-    echo "  $(grn '+') installed mod: $(bold "$mid")"
-    count=$((count+1))
+    printf '%s\n' "$mid"
   done
-  rm -rf "$tmp"; fix_owner "$PZ_MODS" "$PZ_INI"
-  [ "$count" -eq 0 ] && { red "No mod.info found in that item."; pause; return; }
+  rm -rf "$tmp"
+}
+
+do_add_mod() {
+  echo "$(bold 'Add a mod or collection') — paste a Workshop URL or ID."
+  echo "  single mod:  ...filedetails/?id=3713362869"
+  echo "  collection:  ...filedetails/?id=2903157839   (installs every mod in it)"
+  local raw id; local -a ids=()
+  raw="$(read -rp '  Workshop URL or ID: ' x; echo "$x")"
+  id="$(extract_ws_id "$raw")"
+  [ -z "$id" ] && { red "Couldn't find a Workshop ID in that."; pause; return; }
+  echo "Checking $(bold "$id") (single mod or collection?)..."
+  mapfile -t ids < <(resolve_ws_ids "$id")
+  local total="${#ids[@]}" coll=no
+  if [ "$total" -gt 1 ]; then coll=yes; echo "$(grn 'Collection') — $(bold "$total") items. Installing all as local mods (this can take a while)..."; fi
+  local done_mods=0 fail=0 i=0 wid out n
+  for wid in "${ids[@]}"; do
+    i=$((i+1))
+    [ "$coll" = yes ] && printf '  [%d/%d] %s ... ' "$i" "$total" "$wid"
+    out="$(install_workshop_item "$wid")"
+    if [ -z "$out" ]; then fail=$((fail+1)); [ "$coll" = yes ] && echo "$(red 'failed')"; continue; fi
+    n="$(printf '%s\n' "$out" | grep -c .)"; done_mods=$((done_mods+n))
+    if [ "$coll" = yes ]; then echo "$(grn ok) ($n)"; else printf '%s\n' "$out" | sed "s/^/  $(grn +) installed mod: /"; fi
+  done
+  fix_owner "$PZ_MODS" "$PZ_INI"
   echo
-  echo "$(grn "Done — $count mod(s) added as local mods.")"
-  echo "$(ylw 'IMPORTANT:') local mods aren't auto-downloaded by clients — every player must"
-  echo "           $(bold 'subscribe') to this item on the Workshop:"
+  [ "$done_mods" -eq 0 ] && { red "Nothing installed (download failed or no mod.info found)."; pause; return; }
+  echo "$(grn "Done — $done_mods mod(s) added as local mods.")$( [ "$fail" -gt 0 ] && printf ' %s' "$(ylw "($fail item(s) failed)")")"
+  echo "$(ylw 'IMPORTANT:') local mods aren't auto-downloaded — every player must $(bold subscribe) on the Workshop:"
   echo "           https://steamcommunity.com/sharedfiles/filedetails/?id=$id"
-  echo "Restart the server to load it (menu option 3)."
+  [ "$coll" = yes ] && echo "           (it's a collection — players can subscribe to it once to get all $total.)"
+  echo "Restart the server to load them (menu option 3)."
   pause
 }
 
@@ -172,7 +200,7 @@ while true; do
   echo "  ------------------------------------------"
   status_line
   echo "  ------------------------------------------"
-  echo "   1) Start / bring up        6) Add a mod"
+  echo "   1) Start / bring up        6) Add mod / collection"
   echo "   2) Stop                    7) List / remove mods"
   echo "   3) Restart                 8) Settings (name/pw/players/RAM)"
   echo "   4) Status                  9) Backup world"

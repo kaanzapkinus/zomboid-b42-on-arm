@@ -26,6 +26,8 @@ installs box64, downloads the B42 server, applies every fix, sets up auto-restar
 
 When it finishes, **open UDP port `16261`** in your cloud firewall, and you're live. 🎉
 
+To remove everything later: `sudo ./uninstall.sh` (it asks before deleting your worlds).
+
 ---
 
 ## 🎮 Managing your server: `pzctl`
@@ -41,21 +43,30 @@ pzctl
   ------------------------------------------
   service: active    state: LISTENING (players can join)
   ------------------------------------------
-   1) Start / bring up        6) Add a mod
+   1) Start / bring up        6) Add mod / collection
    2) Stop                    7) List / remove mods
    3) Restart                 8) Settings (name/pw/players/RAM)
    4) Status                  9) Backup world
    5) Live logs               0) Exit
 ```
 
-### Adding a mod is one step
-Menu → **6**, paste the Workshop link (or ID), done:
+### Adding mods — one, or a whole collection
+Menu → **6**, paste a Workshop link. A **single mod**:
 ```
 ? Workshop URL or ID: https://steamcommunity.com/sharedfiles/filedetails/?id=3713362869
-  + installed mod id: Faster Reading
+  + installed mod: Faster Reading
 ```
-Then **Restart** (menu → 3). Tell your friends to **subscribe** to that mod on the Workshop —
-that's the only manual step, and `pzctl` prints the exact link for you.
+…or a **collection**, and it installs every mod in it:
+```
+? Workshop URL or ID: https://steamcommunity.com/sharedfiles/filedetails/?id=2903157839
+Collection — 54 items. Installing all as local mods...
+  [1/54] 2256623447 ... ok (1)
+  [2/54] 2392709985 ... ok (1)
+  ...
+Done — 54 mod(s) added as local mods.
+```
+Then **Restart** (menu → 3). Tell your friends to **subscribe** to the mod/collection on the
+Workshop — that's the only manual step, and `pzctl` prints the exact link for you.
 
 ---
 
@@ -122,7 +133,8 @@ A few worth expanding:
 ### What's in the repo
 ```
 install.sh              one-shot installer (arch-checked, interactive)
-pzctl                   interactive control panel (start/stop/mods/settings/backup)
+uninstall.sh            removes everything (prompts before deleting worlds / box64)
+pzctl                   control panel (start/stop, add mod or collection, settings, backup)
 templates/              JVM config, box64 tuning, systemd units (filled in at install)
 scripts/
   zomboid-watchdog.sh   hybrid boot-hang watchdog
