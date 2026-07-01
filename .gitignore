@@ -1,0 +1,19 @@
+# Never commit secrets or keys
+*.key
+*.pem
+*.ppk
+id_ed25519*
+id_rsa*
+.env
+*.env
+
+# Never commit live server data / saves / logs
+Zomboid/
+*.ini
+!docs/*.example
+server-console.txt
+*.log
+hs_err_pid*
+
+# OS cruft
+.DS_Store

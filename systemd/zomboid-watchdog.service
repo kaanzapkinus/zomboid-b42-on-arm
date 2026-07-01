@@ -1,0 +1,6 @@
+[Unit]
+Description=Zomboid B42 boot-hang watchdog (box64)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zomboid-watchdog.sh

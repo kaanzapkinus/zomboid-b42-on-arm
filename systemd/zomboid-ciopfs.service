@@ -1,0 +1,15 @@
+[Unit]
+Description=ciopfs case-insensitive mount for PZ workshop mods (Linux case-sensitivity fix)
+After=local-fs.target
+Before=zomboid-b42.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Mounts the lowercase backing store (108600.ci) as a case-insensitive view at 108600.
+# PZ then reads mods case-insensitively, exactly like on Windows.
+ExecStart=/bin/sh -c 'mountpoint -q /opt/zomboid-server/steamapps/workshop/content/108600 || /usr/bin/ciopfs -o allow_other /opt/zomboid-server/steamapps/workshop/content/108600.ci /opt/zomboid-server/steamapps/workshop/content/108600'
+ExecStop=/bin/sh -c 'fusermount -u /opt/zomboid-server/steamapps/workshop/content/108600 || true'
+
+[Install]
+WantedBy=multi-user.target

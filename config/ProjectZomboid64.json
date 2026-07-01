@@ -1,0 +1,22 @@
+{
+	"mainClass": "zombie/network/GameServer",
+	"classpath": [
+		"java/.",
+		"java/projectzomboid.jar"
+	],
+	"vmArgs": [
+		"-Djava.awt.headless=true",
+		"-Xms4g",
+		"-Xmx16g",
+		"-XX:ActiveProcessorCount=2",
+		"-Dzomboid.steam=1",
+		"-Dzomboid.znetlog=1",
+		"-Djava.library.path=linux64/:natives/",
+		"-Djava.security.egd=file:/dev/urandom",
+		"-XX:+UseSerialGC",
+		"-XX:-UseCompressedOops",
+		"-XX:TieredStopAtLevel=1",
+		"-XX:CompileCommand=exclude,zombie/core/skinnedmodel/advancedanimation/IAnimationVariableRegistry.setVariable",
+		"-XX:-OmitStackTraceInFastThrow"
+	]
+}
