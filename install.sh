@@ -54,8 +54,10 @@ say "RAM ${RAM_GB}G, admin password set, join password $( [ -n "$JOIN_PW" ] && e
 step "Installing dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ciopfs fuse3 wget curl unzip jq ca-certificates >/dev/null || \
-  apt-get install -y -qq ciopfs fuse wget curl unzip jq ca-certificates >/dev/null
+# No system Java needed (the server bundles its own x86 jre64, run via box64).
+# No box86 / armhf libs needed (we use DepotDownloader, not 32-bit steamcmd).
+apt-get install -y -qq ciopfs fuse3 wget curl unzip jq gnupg ca-certificates >/dev/null || \
+  apt-get install -y -qq ciopfs fuse wget curl unzip jq gnupg ca-certificates >/dev/null
 # allow_other for the ciopfs FUSE mount
 grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || echo 'user_allow_other' >> /etc/fuse.conf
 
@@ -68,6 +70,22 @@ if ! command -v box64 >/dev/null; then
     die "box64 install failed. Install it manually (https://github.com/ptitSeb/box64) and re-run."
 fi
 say "box64 ready: $(box64 --version 2>&1 | head -1 || echo installed)"
+
+# box64 must be registered with binfmt_misc so the x86-64 server binary runs transparently
+# (start-server.sh calls ./ProjectZomboid64 with no box64 prefix). The apt package usually
+# handles this; ensure it, with a manual fallback using box64's ELF magic + mask.
+ensure_binfmt() {
+  systemctl restart systemd-binfmt 2>/dev/null || true
+  if [ -e /proc/sys/fs/binfmt_misc/box64 ]; then return 0; fi
+  say "Registering box64 with binfmt_misc (fallback)..."
+  mkdir -p /etc/binfmt.d
+  cat > /etc/binfmt.d/box64.conf <<EOF
+:box64:M::\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\xff\xff\xff\xff\xff\xfe\xff\xff\xff:$(command -v box64):F
+EOF
+  systemctl restart systemd-binfmt 2>/dev/null || true
+}
+ensure_binfmt
+[ -e /proc/sys/fs/binfmt_misc/box64 ] || warn "box64 not registered with binfmt_misc — the server may fail to start (see README Troubleshooting)."
 
 # ----------------------------------------------------------------- 2. DepotDownloader
 step "Setting up DepotDownloader (native ARM Steam content downloader)"
@@ -96,7 +114,7 @@ say "DepotDownloader: $DD"
 step "Downloading Project Zomboid B42 (unstable) server — this can take several minutes"
 mkdir -p "$INSTALL_DIR"
 chown "$TARGET_USER":"$TARGET_USER" "$INSTALL_DIR"       # so DepotDownloader (run as the user) can write here
-sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" $DD -app 380870 -branch unstable -os linux -dir "$INSTALL_DIR" \
+sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $DD -app 380870 -branch unstable -os linux -dir "$INSTALL_DIR" \
   || die "Server download failed (Steam/DepotDownloader). Re-run to resume."
 chmod +x "$INSTALL_DIR/ProjectZomboid64" "$INSTALL_DIR"/*.sh 2>/dev/null || true
 
@@ -141,6 +159,20 @@ systemctl daemon-reload
 systemctl enable zomboid-ciopfs.service zomboid-b42.service zomboid-watchdog.timer >/dev/null 2>&1
 systemctl start  zomboid-ciopfs.service
 
+# ----------------------------------------------------------------- 6b. local firewall (iptables)
+# Oracle Ubuntu images ship a restrictive iptables that ends in a REJECT rule, so the game
+# port is blocked locally unless explicitly allowed. (This is separate from the Oracle
+# Cloud Security List, which must also be opened in the web console — see the end.)
+step "Opening the game port in the local firewall (iptables)"
+apt-get install -y -qq iptables netfilter-persistent iptables-persistent >/dev/null 2>&1 || true
+open_udp() { iptables -C INPUT -p udp --dport "$1" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$1" -j ACCEPT 2>/dev/null || return 1; }
+if command -v iptables >/dev/null && open_udp 16261 && open_udp 16262; then
+  netfilter-persistent save >/dev/null 2>&1 || { mkdir -p /etc/iptables && iptables-save > /etc/iptables/rules.v4 2>/dev/null; } || true
+  say "Allowed UDP 16261-16262 in the local firewall (persisted)."
+else
+  warn "Couldn't set iptables rules automatically — open UDP 16261/16262 manually if the box has a firewall."
+fi
+
 # ----------------------------------------------------------------- 7. first boot -> generate ini
 step "First boot (generates server config; box64 boot is flaky so this may retry)"
 PZ_CONSOLE="$TARGET_HOME/Zomboid/server-console.txt" /usr/local/sbin/pz-boot-retry || \
@@ -161,7 +193,10 @@ cat <<EOF
   Admin pw: $(b "$ADMIN_PW")
   $( [ -n "$JOIN_PW" ] && echo "Join pw:  $(b "$JOIN_PW")" || echo "Join pw:  (none — open server)" )
 
-  1) Open $(b 'UDP port 16261') in your cloud firewall / security list.
+  The local firewall (iptables) is already open for UDP 16261-16262.
+  1) $(b 'Oracle Cloud users:') also allow $(b 'UDP 16261') in your VCN Security List
+     (cloud console -> Networking -> VCN -> Security Lists) — that cloud layer is
+     separate from the box's firewall and cannot be opened from inside the machine.
   2) Manage the server anytime with:   $(b pzctl)
        start / stop / status / logs / add-mod / settings / backup
 

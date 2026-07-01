@@ -61,8 +61,11 @@ that's the only manual step, and `pzctl` prints the exact link for you.
 
 ## ✅ Requirements
 - An **ARM64** (`aarch64`) server running **Ubuntu** with **systemd** (Oracle Ampere free tier is perfect: 4 cores / 24 GB).
-- **UDP 16261** open in your cloud firewall / security list.
-- That's it. The installer pulls in everything else (box64, ciopfs, DepotDownloader).
+- **UDP 16261** reachable. The installer opens the box's **local firewall** (iptables) for you;
+  **Oracle Cloud** users must *also* allow UDP 16261 in the **VCN Security List** (web console) —
+  that cloud layer can't be opened from inside the machine.
+- That's it. The installer pulls in everything else (box64 + binfmt, ciopfs, DepotDownloader).
+  **No system Java needed** — the server bundles its own.
 
 ## 🔁 Keeping it alive
 The installer sets up **auto-restart** and a **watchdog**, so the server comes back on its own
@@ -125,6 +128,27 @@ scripts/
   zomboid-watchdog.sh   hybrid boot-hang watchdog
   boot-retry.sh         restart-until-listening (installed as pz-boot-retry)
 ```
+
+### Dependencies & the Steam downloader
+The installer needs little on a fresh box, because:
+- **Java is bundled** — the server ships its own x86 `jre64`, which box64 runs. No system JDK.
+- **No box86 / 32-bit libs** — we fetch with [DepotDownloader](https://github.com/SteamRE/DepotDownloader)
+  (a native ARM64 binary), so the 32-bit `steamcmd` that needs box86 + `armhf` libs isn't required.
+- box64 is registered with **binfmt_misc** so the x86 server binary runs transparently.
+
+Prefer SteamCMD? [sonroyaalmerol/steamcmd-arm64](https://github.com/sonroyaalmerol/steamcmd-arm64)
+provides it for ARM — but it's a **Docker image**, which adds Docker as a dependency. We use
+DepotDownloader to keep the install Docker-free and single-binary.
+
+### Troubleshooting
+- **Players can't connect** — there are *two* firewalls. The installer opens the box's
+  **iptables** (UDP 16261-16262), but **Oracle Cloud** also needs UDP 16261 in the **VCN
+  Security List** (web console → Networking → your VCN → Security Lists). Both must be open.
+- **Server won't start / "Exec format error"** — box64 isn't registered with binfmt_misc. Run
+  `sudo systemctl restart systemd-binfmt` and check `ls /proc/sys/fs/binfmt_misc/ | grep box64`,
+  or just re-run `sudo ./install.sh`.
+- **Boot seems stuck** — box64 boots are flaky; the watchdog + retry loop handle it. Give it a
+  few minutes, or run `pzctl` → Start.
 
 ### Credits
 Builds on [Dyarven/zomboid-server-on-arm](https://github.com/Dyarven/zomboid-server-on-arm)
