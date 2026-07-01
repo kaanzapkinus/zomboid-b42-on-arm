@@ -7,8 +7,10 @@
 #   hang    = console silent >2 min AND CPU idle over 8s  -> restart & retry
 #   crash   = a shutdown / failed-download line appears   -> STOP (retrying would just recrash)
 #
-# Run it on the server:  bash boot-retry.sh
-SVC=zomboid-b42; PORT=16261; C=/home/ubuntu/Zomboid/server-console.txt
+# Installed as /usr/local/sbin/pz-boot-retry ; also invoked by `pzctl` (menu: Start / Bring up).
+SVC="${PZ_SERVICE:-zomboid-b42}"
+PORT="${PZ_PORT:-16261}"
+C="${PZ_CONSOLE:-/home/ubuntu/Zomboid/server-console.txt}"
 CG=/sys/fs/cgroup/system.slice/$SVC.service/cpu.stat
 for attempt in $(seq 1 6); do
   echo "=== ATTEMPT $attempt $(date -u +%H:%M:%S) ==="
@@ -21,7 +23,7 @@ for attempt in $(seq 1 6); do
     last=$(tail -1 "$C" 2>/dev/null)
     echo "  [a$attempt p$poll] listen=$listen crash=$crash idle=${idle}s | ${last:0:40}"
     [ "$listen" = "1" ] && { echo ">>> LISTENING OK (attempt $attempt) <<<"; exit 0; }
-    [ "$crash" -ge 1 ] 2>/dev/null && { echo ">>> CRASH — not retrying (would recrash) <<<"; exit 2; }
+    [ "$crash" -ge 1 ] 2>/dev/null && { echo ">>> CRASH — not retrying (would recrash). Check logs. <<<"; exit 2; }
     if [ "$idle" -ge 120 ] 2>/dev/null; then
       u1=$(awk '/usage_usec/{print $2}' "$CG" 2>/dev/null); sleep 8; u2=$(awk '/usage_usec/{print $2}' "$CG" 2>/dev/null)
       d=$(( (u2 - u1)/1000000 ))

@@ -3,15 +3,14 @@
 #
 # Why hybrid: box64 boots are flaky and hang at random points, but two states LOOK
 # like a hang without being one, and killing them wastes boot attempts:
-#   1. "Waiting for response from Steam servers" — low CPU, but progressing (a plain
-#      CPU-idle check misfires here and kills good boots).
+#   1. "Waiting for response from Steam servers" — low CPU, but progressing.
 #   2. Silent asset loading — no console output, but high CPU (working).
-# So we only restart when BOTH are true: console silent >6 min AND CPU idle over 8s.
+# So we restart ONLY when BOTH are true: console silent >6 min AND CPU idle over 8s.
 #
-# Install: /usr/local/sbin/zomboid-watchdog.sh  (chmod +x), driven by zomboid-watchdog.timer
-SVC=zomboid-b42
-PORT=16261
-CONSOLE=/home/ubuntu/Zomboid/server-console.txt
+# Installed at /usr/local/sbin/zomboid-watchdog.sh, driven by zomboid-watchdog.timer.
+SVC="${PZ_SERVICE:-zomboid-b42}"
+PORT="${PZ_PORT:-16261}"
+CONSOLE="${PZ_CONSOLE:-/home/ubuntu/Zomboid/server-console.txt}"
 STALL=360
 [ "$(systemctl is-active "$SVC" 2>/dev/null)" != "active" ] && exit 0
 ss -uln 2>/dev/null | grep -q ":$PORT" && exit 0            # listening = healthy

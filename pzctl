@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+#  pzctl — interactive control panel for the Project Zomboid B42 (ARM/box64) server.
+#  Run it as your normal user:   pzctl
+#
+set -uo pipefail
+
+# ------------------------------------------------------------ config (from installer)
+[ -f /etc/zomboid-b42.env ] && . /etc/zomboid-b42.env
+PZ_SERVICE="${PZ_SERVICE:-zomboid-b42}"
+PZ_USER="${PZ_USER:-ubuntu}"
+PZ_HOME="$(getent passwd "$PZ_USER" | cut -d: -f6)"
+PZ_INSTALL="${PZ_INSTALL:-/opt/zomboid-server}"
+PZ_INI="${PZ_INI:-$PZ_HOME/Zomboid/Server/servertest.ini}"
+PZ_CONSOLE="${PZ_CONSOLE:-$PZ_HOME/Zomboid/server-console.txt}"
+PZ_MODS="${PZ_MODS:-$PZ_HOME/Zomboid/mods}"
+PZ_JSON="$PZ_INSTALL/ProjectZomboid64.json"
+PZ_WS="$PZ_INSTALL/steamapps/workshop/content/108600"
+PZ_DD="${PZ_DD:-/opt/depotdownloader/DepotDownloader}"
+PORT=16261
+export PZ_SERVICE PZ_CONSOLE
+
+# ------------------------------------------------------------ helpers
+bold() { printf '\033[1m%s\033[0m' "$*"; }
+grn()  { printf '\033[1;32m%s\033[0m' "$*"; }
+red()  { printf '\033[1;31m%s\033[0m' "$*"; }
+ylw()  { printf '\033[1;33m%s\033[0m' "$*"; }
+pause(){ printf '\n'; read -rp "$(bold 'Press Enter to continue...')" _; }
+as_user() { if [ "$(id -u)" -eq 0 ]; then sudo -u "$PZ_USER" env HOME="$PZ_HOME" "$@"; else "$@"; fi; }
+fix_owner() { [ "$(id -u)" -eq 0 ] && chown -R "$PZ_USER":"$PZ_USER" "$@" 2>/dev/null || true; }
+is_listening() { sudo ss -uln 2>/dev/null | grep -q ":$PORT"; }
+
+status_line() {
+  local act lis
+  act=$(sudo systemctl is-active "$PZ_SERVICE" 2>/dev/null)
+  if is_listening; then lis="$(grn 'LISTENING (players can join)')"
+  elif [ "$act" = active ]; then lis="$(ylw 'booting / not yet listening')"
+  else lis="$(red 'stopped')"; fi
+  printf '  service: %s    state: %s\n' "$act" "$lis"
+}
+
+# ------------------------------------------------------------ actions
+do_start() {
+  echo "Bringing the server up (box64 boot is flaky — auto-retries until it listens)..."
+  PZ_CONSOLE="$PZ_CONSOLE" PZ_SERVICE="$PZ_SERVICE" pz-boot-retry
+  pause
+}
+do_stop()    { sudo systemctl stop "$PZ_SERVICE"; echo "$(ylw Stopped)."; pause; }
+do_restart() { echo "Restarting..."; PZ_CONSOLE="$PZ_CONSOLE" PZ_SERVICE="$PZ_SERVICE" pz-boot-retry; pause; }
+
+do_status() {
+  echo; status_line; echo
+  echo "$(bold 'Uptime:')      $(sudo systemctl show "$PZ_SERVICE" -p ActiveEnterTimestamp --value 2>/dev/null)"
+  echo "$(bold 'Public IP:')   $(curl -fsSL --max-time 4 ifconfig.me 2>/dev/null || echo '?'):$PORT"
+  echo "$(bold 'Active mods:') $(grep -m1 '^Mods=' "$PZ_INI" 2>/dev/null | sed 's/^Mods=//' | awk -F';' '{print NF" mods"}')"
+  echo "$(bold 'RAM (-Xmx):')  $(grep -oE '"-Xmx[0-9]+g"' "$PZ_JSON" 2>/dev/null | tr -d '"-')"
+  echo; echo "$(bold 'Last console lines:')"
+  tail -n 6 "$PZ_CONSOLE" 2>/dev/null | sed 's/^/  /'
+  pause
+}
+
+do_logs() {
+  echo "Live server log — $(ylw 'Ctrl+C to return to the menu')."; sleep 1
+  tail -n 40 -f "$PZ_CONSOLE" 2>/dev/null || echo "No console log yet."
+  echo; pause
+}
+
+extract_ws_id() { printf '%s' "$1" | grep -oE '[0-9]{6,}' | head -1; }
+
+do_add_mod() {
+  echo "$(bold 'Add a mod') — paste a Workshop URL or ID."
+  echo "  e.g. https://steamcommunity.com/sharedfiles/filedetails/?id=3713362869"
+  local raw id tmp count=0
+  raw="$(read -rp '  Workshop URL or ID: ' x; echo "$x")"
+  id="$(extract_ws_id "$raw")"
+  [ -z "$id" ] && { red "Couldn't find a Workshop ID in that."; pause; return; }
+  echo "Downloading Workshop item $(bold "$id") via DepotDownloader..."
+  tmp="$(mktemp -d)"
+  if ! as_user $PZ_DD -app 108600 -pubfile "$id" -dir "$tmp" >/dev/null 2>&1; then
+    red "Download failed (item private? bad ID? Steam hiccup?)."; rm -rf "$tmp"; pause; return
+  fi
+  # Install every mod contained in the item as a LOCAL mod (avoids the steam-download crash).
+  while IFS= read -r info; do
+    local root mid
+    root="$(dirname "$info")"; mid="$(grep -m1 '^id=' "$info" | cut -d= -f2- | tr -d '\r')"
+    [ -z "$mid" ] && continue
+    rm -rf "$PZ_MODS/$(basename "$root")"
+    cp -r "$root" "$PZ_MODS/"
+    # add to Mods= (dedup)
+    local cur; cur="$(grep -m1 '^Mods=' "$PZ_INI" | sed 's/^Mods=//')"
+    if ! printf ';%s;' "$cur" | grep -qF ";$mid;"; then
+      [ -z "$cur" ] && new="$mid" || new="$cur;$mid"
+      # escape & and | for sed
+      esc="$(printf '%s' "$new" | sed 's/[&|]/\\&/g')"
+      sed -i "s|^Mods=.*|Mods=$esc|" "$PZ_INI"
+    fi
+    echo "  $(grn '+') installed mod id: $(bold "$mid")"
+    count=$((count+1))
+  done < <(find "$tmp" -name mod.info)
+  rm -rf "$tmp"; fix_owner "$PZ_MODS" "$PZ_INI"
+  [ "$count" -eq 0 ] && { red "No mod.info found in that item."; pause; return; }
+  echo
+  echo "$(grn "Done — $count mod(s) added as local mods.")"
+  echo "$(ylw 'IMPORTANT:') local mods aren't auto-downloaded by clients — every player must"
+  echo "           $(bold 'subscribe') to this item on the Workshop:"
+  echo "           https://steamcommunity.com/sharedfiles/filedetails/?id=$id"
+  echo "Restart the server to load it (menu option 3)."
+  pause
+}
+
+do_list_mods() {
+  echo "$(bold 'Active mods') (Mods= in servertest.ini):"; echo
+  local cur; cur="$(grep -m1 '^Mods=' "$PZ_INI" | sed 's/^Mods=//')"
+  [ -z "$cur" ] && { echo "  (none)"; pause; return; }
+  local IFS=';'; local i=1; read -ra arr <<< "$cur"
+  for m in "${arr[@]}"; do printf '  %2d) %s\n' "$i" "$m"; i=$((i+1)); done
+  echo; local pick; pick="$(read -rp 'Number to REMOVE (Enter to cancel): ' x; echo "$x")"
+  [ -z "$pick" ] && return
+  [[ "$pick" =~ ^[0-9]+$ ]] || { red "Not a number."; pause; return; }
+  local target="${arr[$((pick-1))]:-}"; [ -z "$target" ] && { red "Out of range."; pause; return; }
+  local new=""; for m in "${arr[@]}"; do [ "$m" = "$target" ] && continue; new="${new:+$new;}$m"; done
+  local esc; esc="$(printf '%s' "$new" | sed 's/[&|]/\\&/g')"
+  sed -i "s|^Mods=.*|Mods=$esc|" "$PZ_INI"; fix_owner "$PZ_INI"
+  echo "$(grn "Removed") '$target' from the active list. (Files kept in $PZ_MODS.) Restart to apply."
+  pause
+}
+
+do_settings() {
+  echo "$(bold 'Settings') — Enter to keep the current value."
+  local pn mp jp ram
+  pn="$(grep -m1 '^PublicName=' "$PZ_INI" | cut -d= -f2-)"
+  mp="$(grep -m1 '^MaxPlayers=' "$PZ_INI" | cut -d= -f2-)"
+  jp="$(grep -m1 '^Password='  "$PZ_INI" | cut -d= -f2-)"
+  ram="$(grep -oE '"-Xmx[0-9]+g"' "$PZ_JSON" | grep -oE '[0-9]+')"
+  local nPn nMp nJp nRam
+  nPn="$(read -rp "  Server name shown in browser [$pn]: " x; echo "${x:-$pn}")"
+  nMp="$(read -rp "  Max players [$mp]: " x; echo "${x:-$mp}")"
+  nJp="$(read -rp "  Join password [${jp:-none}]: " x; echo "${x:-$jp}")"
+  nRam="$(read -rp "  RAM in GB [$ram]: " x; echo "${x:-$ram}")"
+  [ -n "$nPn" ]  && { grep -q '^PublicName=' "$PZ_INI" && sed -i "s|^PublicName=.*|PublicName=$nPn|" "$PZ_INI" || echo "PublicName=$nPn" >> "$PZ_INI"; }
+  [ -n "$nMp" ]  && sed -i "s|^MaxPlayers=.*|MaxPlayers=$nMp|" "$PZ_INI"
+  sed -i "s|^Password=.*|Password=$nJp|" "$PZ_INI"
+  [ -n "$nRam" ] && sed -i "s|\"-Xmx[0-9]*g\"|\"-Xmx${nRam}g\"|" "$PZ_JSON"
+  fix_owner "$PZ_INI" "$PZ_JSON"
+  echo "$(grn Saved). Restart the server to apply."
+  pause
+}
+
+do_backup() {
+  local dir="$PZ_HOME/pz_backups" ts stamp
+  ts="$(date +%Y%m%d_%H%M%S)"; mkdir -p "$dir"
+  echo "Backing up world + config..."
+  as_user tar czf "$dir/pzbackup_$ts.tar.gz" -C "$PZ_HOME" Zomboid/Server Zomboid/Saves 2>/dev/null
+  cp "$PZ_JSON" "$dir/ProjectZomboid64_$ts.json" 2>/dev/null
+  fix_owner "$dir"
+  echo "$(grn 'Saved') to $dir/pzbackup_$ts.tar.gz"
+  pause
+}
+
+# ------------------------------------------------------------ menu loop
+[ -f "$PZ_INI" ] || echo "$(ylw 'Note:') $PZ_INI not found yet — start the server once to generate it."
+while true; do
+  clear 2>/dev/null || true
+  echo "$(bold '  Project Zomboid B42  —  pzctl')"
+  echo "  ------------------------------------------"
+  status_line
+  echo "  ------------------------------------------"
+  echo "   1) Start / bring up        6) Add a mod"
+  echo "   2) Stop                    7) List / remove mods"
+  echo "   3) Restart                 8) Settings (name/pw/players/RAM)"
+  echo "   4) Status                  9) Backup world"
+  echo "   5) Live logs               0) Exit"
+  echo
+  choice="$(read -rp '  > ' x; echo "$x")"
+  case "$choice" in
+    1) do_start ;;   2) do_stop ;;    3) do_restart ;; 4) do_status ;; 5) do_logs ;;
+    6) do_add_mod ;; 7) do_list_mods ;; 8) do_settings ;; 9) do_backup ;;
+    0|q|Q) echo "bye."; exit 0 ;;
+    *) : ;;
+  esac
+done

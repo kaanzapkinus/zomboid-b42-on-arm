@@ -1,16 +1,14 @@
-# Never commit secrets or keys
+# Never commit secrets/keys
 *.key
 *.pem
 *.ppk
 id_ed25519*
 id_rsa*
 .env
-*.env
+!/*.env.example
 
 # Never commit live server data / saves / logs
 Zomboid/
-*.ini
-!docs/*.example
 server-console.txt
 *.log
 hs_err_pid*

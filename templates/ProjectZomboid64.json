@@ -6,8 +6,8 @@
 	],
 	"vmArgs": [
 		"-Djava.awt.headless=true",
-		"-Xms4g",
-		"-Xmx16g",
+		"-Xms2g",
+		"-Xmx__XMX__",
 		"-XX:ActiveProcessorCount=2",
 		"-Dzomboid.steam=1",
 		"-Dzomboid.znetlog=1",

@@ -1,0 +1,28 @@
+[Unit]
+Description=Project Zomboid B42 Dedicated Server (box64/ARM)
+After=network-online.target zomboid-ciopfs.service
+Wants=network-online.target
+Requires=zomboid-ciopfs.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__INSTALL_DIR__
+# box64 tuning — kept in sync with the [ProjectZomboid64] block in /etc/box64.box64rc.
+# STRONGMEM=3 is critical (lower values deadlock the JVM at boot).
+Environment=BOX64_DYNAREC_STRONGMEM=3
+Environment=BOX64_DYNAREC_SAFEFLAGS=2
+Environment=BOX64_DYNAREC_ALIGNED_ATOMICS=1
+Environment=BOX64_JVM=0
+Environment=BOX64_SSE42=0
+Environment=BOX64_MAXCPU=4
+Environment=BOX64_LOG=0
+ExecStart=/bin/bash __INSTALL_DIR__/start-server.sh -servername servertest -adminpassword __ADMIN_PW__
+# start-server.sh always exits 0, masking JVM crashes, so `always` (not on-failure) is required.
+Restart=always
+RestartSec=20
+TimeoutStopSec=120
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
