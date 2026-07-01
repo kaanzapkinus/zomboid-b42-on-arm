@@ -41,6 +41,13 @@ INSTALL_DIR=/opt/zomboid-server
 WS="$INSTALL_DIR/steamapps/workshop/content/108600"
 say "Service user: $(b "$TARGET_USER")   home: $(b "$TARGET_HOME")"
 
+# ----------------------------------------------------------------- refresh package lists FIRST
+# People forget `sudo apt update` on a fresh box, which then breaks every package install.
+# Do it up front so the rest of the installer can rely on current package lists.
+step "Refreshing package lists (apt update)"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y || die "apt update failed — check the box's network/DNS, then re-run."
+
 # ----------------------------------------------------------------- interactive config
 step "Configuration (press Enter to accept defaults)"
 DETECT_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
@@ -52,8 +59,6 @@ say "RAM ${RAM_GB}G, admin password set, join password $( [ -n "$JOIN_PW" ] && e
 
 # ----------------------------------------------------------------- 1. dependencies
 step "Installing dependencies"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
 # No system Java needed (the server bundles its own x86 jre64, run via box64).
 # No box86 / armhf libs needed (we use DepotDownloader, not 32-bit steamcmd).
 apt-get install -y -qq ciopfs fuse3 wget curl unzip jq gnupg ca-certificates >/dev/null || \
@@ -116,7 +121,11 @@ mkdir -p "$INSTALL_DIR"
 chown "$TARGET_USER":"$TARGET_USER" "$INSTALL_DIR"       # so DepotDownloader (run as the user) can write here
 sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $DD -app 380870 -branch unstable -os linux -dir "$INSTALL_DIR" \
   || die "Server download failed (Steam/DepotDownloader). Re-run to resume."
-chmod +x "$INSTALL_DIR/ProjectZomboid64" "$INSTALL_DIR"/*.sh 2>/dev/null || true
+chmod +x "$INSTALL_DIR/ProjectZomboid64" "$INSTALL_DIR/ProjectZomboid32" "$INSTALL_DIR"/*.sh 2>/dev/null || true
+# DepotDownloader strips execute bits — restore them on the bundled JRE, or start-server.sh
+# can't launch java ("couldn't determine 32/64 bit of java") and the service just loops.
+chmod +x "$INSTALL_DIR"/jre64/bin/* 2>/dev/null || true
+[ -e "$INSTALL_DIR/jre64/lib/jspawnhelper" ] && chmod +x "$INSTALL_DIR/jre64/lib/jspawnhelper" || true
 
 # ----------------------------------------------------------------- 4. config files
 step "Writing box64 + JVM configuration"
