@@ -4,8 +4,9 @@
 # few automated retries is the fast way to get to "listening".
 #
 #   success = UDP :16261 is listening
-#   hang    = console silent >2 min AND CPU idle over 8s  -> restart & retry
-#   crash   = a shutdown / failed-download line appears   -> STOP (retrying would just recrash)
+#   hang    = console silent >2 min AND CPU idle over 8s   -> restart & retry
+#   a box64 JIT SIGSEGV is FLAKY, so `Restart=always` reboots it and we keep trying.
+#   Only a failed Workshop download (onItemNotDownloaded) is deterministic -> STOP (recrashes).
 #
 # Installed as /usr/local/sbin/pz-boot-retry ; also invoked by `pzctl` (menu: Start / Bring up).
 SVC="${PZ_SERVICE:-zomboid-b42}"
@@ -18,12 +19,12 @@ for attempt in $(seq 1 6); do
   for poll in $(seq 1 40); do
     sleep 15
     listen=$(sudo ss -uln 2>/dev/null | grep -c ":$PORT")
-    crash=$(grep -c "Shutdown handling started\|onItemNotDownloaded" "$C" 2>/dev/null)
+    crash=$(grep -c "onItemNotDownloaded" "$C" 2>/dev/null)
     idle=$(( $(date +%s) - $(stat -c %Y "$C" 2>/dev/null || echo 0) ))
     last=$(tail -1 "$C" 2>/dev/null)
     echo "  [a$attempt p$poll] listen=$listen crash=$crash idle=${idle}s | ${last:0:40}"
     [ "$listen" = "1" ] && { echo ">>> LISTENING OK (attempt $attempt) <<<"; exit 0; }
-    [ "$crash" -ge 1 ] 2>/dev/null && { echo ">>> CRASH — not retrying (would recrash). Check logs. <<<"; exit 2; }
+    [ "$crash" -ge 1 ] 2>/dev/null && { echo ">>> Workshop download failed — not retrying (deterministic). Check the mod. <<<"; exit 2; }
     if [ "$idle" -ge 120 ] 2>/dev/null; then
       u1=$(awk '/usage_usec/{print $2}' "$CG" 2>/dev/null); sleep 8; u2=$(awk '/usage_usec/{print $2}' "$CG" 2>/dev/null)
       d=$(( (u2 - u1)/1000000 ))

@@ -194,6 +194,9 @@ if [ -f "$INI" ] && [ -n "$JOIN_PW" ]; then
   say "Join password applied."
 fi
 
+# Start the watchdog NOW (not just on next boot) so a hung/crashed boot self-recovers from here on.
+systemctl start zomboid-watchdog.timer >/dev/null 2>&1 || true
+
 # ----------------------------------------------------------------- done
 PUBIP="$(curl -fsSL --max-time 5 ifconfig.me 2>/dev/null || echo YOUR_SERVER_IP)"
 step "Done"
