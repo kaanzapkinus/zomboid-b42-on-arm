@@ -11,13 +11,13 @@ WorkingDirectory=__INSTALL_DIR__
 # box64 tuning for the JVM. These are inherited by the java CHILD process (where the JVM/JIT
 # actually runs and crashes happen) — box64 matches config by process name, so the launcher's
 # rcfile section does NOT reach java; the environment does.
-#   BOX64_JVM=0 turns OFF box64's libjvm auto-detection. That auto-detection otherwise FORCES
-#   STRONGMEM=1 (a documented source of random JIT-code SIGSEGVs — box64 issue #2041). With it
-#   off we set the JVM-safe values ourselves:
-#     STRONGMEM=3  — more memory barriers => far fewer weak-memory crashes than the forced 1
-#     BIGBLOCK=0   — smaller dynarec blocks, required for the JVM's self-modifying JIT code
+#   BOX64_JVM=0 turns OFF box64's libjvm auto-detection, which otherwise FORCES STRONGMEM=1
+#   (a documented source of random JIT-code SIGSEGVs — box64 issue #2041). With it off we set
+#   STRONGMEM=3 ourselves (more memory barriers => far fewer weak-memory crashes than 1).
+# NOTE: we deliberately do NOT set BOX64_DYNAREC_BIGBLOCK=0 here. box64's auto-detection would,
+# but with JVM=0 we leave it at box64's default — this matches the proven-stable production
+# server; BIGBLOCK=0 gave no measurable crash improvement in testing.
 Environment=BOX64_DYNAREC_STRONGMEM=3
-Environment=BOX64_DYNAREC_BIGBLOCK=0
 Environment=BOX64_DYNAREC_SAFEFLAGS=2
 Environment=BOX64_DYNAREC_ALIGNED_ATOMICS=1
 Environment=BOX64_JVM=0

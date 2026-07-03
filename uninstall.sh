@@ -7,6 +7,9 @@
 #  Removes the server, its systemd services, scripts, config and firewall rules.
 #  Prompts before deleting your worlds/saves and before touching the shared box64.
 #
+#  !!! USE AT YOUR OWN RISK !!!  This `rm -rf`s /opt/zomboid-server and (after a prompt) your
+#  entire ~/Zomboid folder. If you kept unrelated files in those paths, they go too.
+#
 set -uo pipefail   # deliberately NOT -e: keep going even if pieces are already gone
 
 b()   { printf '\033[1m%s\033[0m' "$*"; }
@@ -32,6 +35,8 @@ WS="$INSTALL_DIR/steamapps/workshop/content/108600"
 
 echo "This removes: the PZ B42 server, its systemd services, pzctl, the watchdog, the"
 echo "box64 [ProjectZomboid64] tuning we added, and the UDP 16261-16262 firewall rules."
+warn "USE AT YOUR OWN RISK — this rm -rf's $INSTALL_DIR and (if you confirm below) ALL of"
+warn "$PZ_HOME/Zomboid. Anything you stored inside those folders will be gone for good."
 is_yes "$(ask 'Continue? (type y to proceed)' 'n')" || { echo "Aborted."; exit 0; }
 
 # ----------------------------------------------------------------- 1. services

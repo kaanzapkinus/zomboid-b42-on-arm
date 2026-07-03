@@ -26,7 +26,23 @@ installs box64, downloads the B42 server, applies every fix, sets up auto-restar
 
 When it finishes, **open UDP port `16261`** in your cloud firewall, and you're live. 🎉
 
-To remove everything later: `sudo ./uninstall.sh` (it asks before deleting your worlds).
+To remove everything later: `sudo ./uninstall.sh` — **use at your own risk**: it `rm -rf`s the
+server and (after a prompt) your whole `~/Zomboid` folder, so don't keep unrelated files there.
+
+---
+
+## 👥 How friends join (important!)
+
+Each player must tick **"Use Steam Relay"** when they add the server — otherwise they hang on
+**"Joining game…"** forever, *even though the port looks open*.
+
+In Project Zomboid: **Join → Favorites / Add a server** (or edit the saved server) →
+tick **`Use Steam Relay`** → Save → connect. Done.
+
+> **Why:** on box64/ARM behind cloud NAT, PZ's *direct* UDP session never completes — the second
+> port `16262` even reports "open", but the handshake stalls. This is a long-standing PZ quirk
+> (present since B41) that can't be fixed server-side. **Steam Relay** routes the session through
+> Steam and just works.
 
 ---
 
@@ -133,7 +149,7 @@ A few worth expanding:
 ### What's in the repo
 ```
 install.sh              one-shot installer (arch-checked, interactive)
-uninstall.sh            removes everything (prompts before deleting worlds / box64)
+uninstall.sh            removes everything — USE AT YOUR OWN RISK (rm -rf; prompts for worlds)
 pzctl                   control panel (start/stop, add mod or collection, settings, backup)
 templates/              JVM config, box64 tuning, systemd units (filled in at install)
 scripts/
@@ -153,7 +169,11 @@ provides it for ARM — but it's a **Docker image**, which adds Docker as a depe
 DepotDownloader to keep the install Docker-free and single-binary.
 
 ### Troubleshooting
-- **Players can't connect** — there are *two* firewalls. The installer opens the box's
+- **Players stuck on "Joining game…"** (connects, gets the server name, then hangs) — they need
+  **"Use Steam Relay"** ticked when adding the server. Direct connection doesn't complete on
+  box64/ARM behind cloud NAT (`16262` looks open but the handshake stalls — a PZ quirk since B41,
+  not fixable server-side). See [How friends join](#-how-friends-join-important) above.
+- **Players can't connect at all** — there are *two* firewalls. The installer opens the box's
   **iptables** (UDP 16261-16262), but **Oracle Cloud** also needs UDP 16261 in the **VCN
   Security List** (web console → Networking → your VCN → Security Lists). Both must be open.
 - **Server won't start / "Exec format error"** — box64 isn't registered with binfmt_misc. Run
